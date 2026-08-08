@@ -94,14 +94,42 @@ fn execute(chip: &mut VirtualChip, op: u8, n2: u8, n3: u8, n4: u8) {
             0x4 => {
                 let sum: u16 = (chip.v[n2 as usize] as u16) + (chip.v[n3 as usize] as u16);
                 if sum > 255 {
-                    chip.v[n2 as usize] = 0;  // TODO: finish this
+                    chip.v[n2 as usize] = sum as u8;
+                } else {
                 }
             }
+            0x5 => {
+                if chip.v[n2 as usize] > chip.v[n3 as usize] {
+                    chip.v[n2 as usize] -= chip.v[n3 as usize]
+                } else {
+                }
+            }
+            0x6 => {
+                if chip.v[n2 as usize] & 1 == 1 {
+                    chip.v[n2 as usize] /= 2
+                }
+            }
+            0x7 => {
+                if chip.v[n3 as usize] > chip.v[n2 as usize] {
+                    chip.v[n2 as usize] = chip.v[n3 as usize] - chip.v[n2 as usize]
+                }
+            }
+            0xe => {
+                if (chip.v[n2 as usize] >> 7) & 1 == 1 {
+                    chip.v[n2 as usize] *= 2
+                }
+            }
+            _ => return,
         },
-        0x9 => ,
-        0xa => println!("LD I, addr"),
-        0xb => println!("JP V0, addr"),
-        0xc => println!("RND Vx, byte"),
+        0x9 => {
+            if chip.v[n2 as usize] != chip.v[n3 as usize] {
+                chip.pc += 2
+            } else {
+            }
+        }
+        0xa => chip.i = ((((n2 << 4) | n3) as u16) << 4) | n4 as u16,
+        0xb => chip.pc = (((((n2 << 4) | n3) as u16) << 4) | n4 as u16) + chip.v[0] as u16,
+        0xc => chip.v[n2 as usize] = rand::random::<u8>() & (n3 << 4 | n4),
         0xd => println!("DRW Vx, Vy, nibble"),
         0xe => println!("SKP Vx"),
         0xf => println!("LD"),
@@ -132,6 +160,6 @@ fn main() {
         chip.pc += 2;
 
         let (op, n2, n3, n4) = decode(opcode);
-        execute(&chip, op, n2, n3, n4);
+        execute(&mut chip, op, n2, n3, n4);
     }
 }
