@@ -1,16 +1,31 @@
+use minifb::{Key, KeyRepeat, Window, WindowOptions};
 use std::fs;
 
-use minifb::{Window, WindowOptions};
+mod instructions;
 
-struct VirtualChip {
-    memory: [u8; 4096],
-    v: [u8; 16], // general purpose registers
-    i: u16,      // special register
-    pc: u16,
-    sp: u8,
-    stack: [u16; 16],
-    v_screen: [[bool; 64]; 32], // Chip-8 screen has 64x32 pixels
-}
+mod structs;
+use structs::VirtualChip;
+
+const WINDOW_WIDTH: usize = 64;
+const WINDOW_HEIGHT: usize = 32;
+const DIGITS_SPRITES: [u8; 80] = [
+    0xf0, 0x90, 0x90, 0x90, 0xf0, // 0
+    0x20, 0x60, 0x20, 0x20, 0x70, // 1
+    0xf0, 0x10, 0xf0, 0x80, 0xf0, // 2
+    0xf0, 0x10, 0xf0, 0x10, 0xf0, // 3
+    0x90, 0x90, 0xf0, 0x10, 0x10, // 4
+    0xf0, 0x80, 0xf0, 0x10, 0xf0, // 5
+    0xf0, 0x80, 0xf0, 0x90, 0xf0, // 6
+    0xf0, 0x10, 0x20, 0x40, 0x40, // 7
+    0xf0, 0x90, 0xf0, 0x90, 0xf0, // 8
+    0xf0, 0x90, 0xf0, 0x10, 0xf0, // 9
+    0xf0, 0x90, 0xf0, 0x90, 0x90, // A
+    0xe0, 0x90, 0xe0, 0x90, 0xe0, // B
+    0xf0, 0x80, 0x80, 0x80, 0xf0, // C
+    0xe0, 0x90, 0x90, 0x90, 0xe0, // D
+    0xf0, 0x80, 0xf0, 0x80, 0xf0, // E
+    0xf0, 0x80, 0xf0, 0x80, 0x80, // F
+]
 
 fn load_rom(rom_path: &str) -> Vec<u8> {
     match fs::read(rom_path) {
@@ -53,150 +68,56 @@ fn decode(opcode: u16) -> (u8, u8, u8, u8) {
     )
 }
 
-fn execute(chip: &mut VirtualChip, op: u8, n2: u8, n3: u8, n4: u8) {
+fn execute(chip: &mut VirtualChip, window: &Window, op: u8, n2: u8, n3: u8, n4: u8) {
     match op {
         0x0 => match n4 {
-            0x0 => chip.v_screen = [[false; 64]; 32],
-            0xe => {
-                chip.pc = chip.stack[chip.sp as usize];
-                chip.sp -= 1;
-            }
+            0x0 => instructions::cls(chip),
+            0xe => instructions::return_from_subroutine(chip),
             _ => return,
         },
-        0x1 => chip.pc = (((n2 << 4) | n3) as u16) << 4 | n4 as u16,
-        0x2 => {
-            chip.sp += 1;
-            chip.stack[chip.sp as usize] = chip.pc;
-            chip.pc = (((n2 << 4) | n3) as u16) << 4 | n4 as u16;
-        }
-        0x3 => {
-            if chip.v[n2 as usize] == (n3 << 4) | n4 {
-                chip.pc += 2
-            } else {
-            }
-        }
-        0x4 => {
-            if chip.v[n2 as usize] != (n3 << 4) | n4 {
-                chip.pc += 2
-            } else {
-            }
-        }
-        0x5 => {
-            if chip.v[n2 as usize] == chip.v[n3 as usize] {
-                chip.pc += 2
-            } else {
-            }
-        }
-        0x6 => chip.v[n2 as usize] = (n3 << 4) | n4,
-        0x7 => chip.v[n2 as usize] += (n3 << 4) | n4,
+        0x1 => instructions::jump_to_nnn(chip, n2, n3, n4),
+        0x2 => instructions::call(chip, n2, n3, n4),
+        0x3 => instructions::skip_instruction(chip, n2, n3, n4),
+        0x4 => instructions::sne_vx_byte(chip, n2, n3, n4),
+        0x5 => instructions::se_vx_vy(chip, n2, n3),
+        0x6 => instructions::ld_vx_byte(chip, n2, n3, n4),
+        0x7 => instructions::add_vx_byte(chip, n2, n3, n4),
         0x8 => match n4 {
-            0x0 => chip.v[n2 as usize] = chip.v[n3 as usize],
-            0x1 => chip.v[n2 as usize] = chip.v[n2 as usize] | chip.v[n3 as usize],
-            0x2 => chip.v[n2 as usize] = chip.v[n2 as usize] & chip.v[n3 as usize],
-            0x3 => chip.v[n2 as usize] = chip.v[n2 as usize] ^ chip.v[n3 as usize],
-            0x4 => {
-                let sum: u16 = (chip.v[n2 as usize] as u16) + (chip.v[n3 as usize] as u16);
-                if sum > 255 {
-                    chip.v[15] = 1;
-                    chip.v[n2 as usize] = sum as u8;
-                } else {
-                    chip.v[15] = 0;
-                }
-            }
-            0x5 => {
-                if chip.v[n2 as usize] > chip.v[n3 as usize] {
-                    chip.v[15] = 1;
-                    chip.v[n2 as usize] -= chip.v[n3 as usize]
-                } else {
-                    chip.v[15] = 0;
-                }
-            }
-            0x6 => {
-                if chip.v[n2 as usize] & 1 == 1 {
-                    chip.v[15] = 1;
-                    chip.v[n2 as usize] /= 2
-                } else {
-                    chip.v[15] = 0;
-                }
-            }
-            0x7 => {
-                if chip.v[n3 as usize] > chip.v[n2 as usize] {
-                    chip.v[15] = 1;
-                    chip.v[n2 as usize] = chip.v[n3 as usize] - chip.v[n2 as usize]
-                } else {
-                    chip.v[15] = 0;
-                }
-            }
-            0xe => {
-                if (chip.v[n2 as usize] >> 7) & 1 == 1 {
-                    chip.v[15] = 1;
-                    chip.v[n2 as usize] *= 2
-                } else {
-                    chip.v[15] = 0;
-                }
-            }
+            0x0 => instructions::ld_vx_vy(chip, n2, n3),
+            0x1 => instructions::or_vx_vy(chip, n2, n3),
+            0x2 => instructions::and_vx_vy(chip, n2, n3),
+            0x3 => instructions::xor_vx_vy(chip, n2, n3),
+            0x4 => instructions::add_vx_vy(chip, n2, n3),
+            0x5 => instructions::sub_vx_vy(chip, n2, n3),
+            0x6 => instructions::shr_vx_vy(chip, n2),
+            0x7 => instructions::subn_vx_vy(chip, n2, n3),
+            0xe => instructions::shl_vx_vy(chip, n2),
             _ => return,
         },
-        0x9 => {
-            if chip.v[n2 as usize] != chip.v[n3 as usize] {
-                chip.pc += 2
-            } else {
-            }
-        }
-        0xa => chip.i = ((((n2 << 4) | n3) as u16) << 4) | n4 as u16,
-        0xb => chip.pc = (((((n2 << 4) | n3) as u16) << 4) | n4 as u16) + chip.v[0] as u16,
-        0xc => chip.v[n2 as usize] = rand::random::<u8>() & (n3 << 4 | n4),
-        0xd => {
-            chip.v[15] = 0;
-            let mut mem_addr = chip.i as usize;
-            for i in 0..n4 {
-                let sprite_byte = chip.memory[mem_addr]; // 1 byte from memory
-                for bit_idx in 0..8 {
-                    let (screen_x, screen_y) = (
-                        (chip.v[n2 as usize] as u16 + bit_idx) % 64,
-                        (chip.v[n3 as usize] as u16 + i as u16) % 32,
-                    );
-                    let current_screen_value = chip.v_screen[screen_y as usize][screen_x as usize];
-                    let bit_value = (sprite_byte >> (7 - bit_idx)) & 1;
-                    let new_value = current_screen_value as u8 ^ bit_value;
-
-                    if current_screen_value && bit_value == 1 {
-                        chip.v[15] |= 1;
-                    }
-                    chip.v_screen[screen_y as usize][screen_x as usize] = new_value != 0;
-                }
-                mem_addr += 1;
-            }
-        }
-        0xe => println!("SKP Vx"),
+        0x9 => instructions::sne_vx_vy(chip, n2, n3),
+        0xa => instructions::ld_i_addr(chip, n2, n3, n4),
+        0xb => instructions::jump_to_nnn_v0(chip, n2, n3, n4),
+        0xc => instructions::rnd_vx_byte(chip, n2, n3, n4),
+        0xd => instructions::drw(chip, n2, n3, n4),
+        0xe => match n3 {
+            0x9 => instructions::skp_vx(chip, n2),
+            0xa => instructions::sknp_vx(chip, n2),
+            _ => return,
+        },
         0xf => match n3 {
-            0x0 => {}
-            0x1 => match n4 {
-                0xE => chip.i += chip.v[n2 as usize] as u16,
+            0x0 => match n4 {
+                0x7 => {}
+                0xa => instructions::ld_vx_k(chip, window, n2),
                 _ => return,
             },
-            0x3 => {
-                let vx = chip.v[n2 as usize];
-                let mem_addr = chip.i as usize;
-
-                chip.memory[mem_addr] = vx / 100;
-                chip.memory[mem_addr + 1] = (vx % 100) / 10;
-                chip.memory[mem_addr + 2] = vx % 10;
-            }
-            0x5 => {
-                let mut mem_addr = chip.i as usize;
-                for i in 0..=n2 {
-                    chip.memory[mem_addr] = chip.v[i as usize];
-                    mem_addr += 1;
-                }
-            }
-            0x6 => {
-                let mut mem_addr = chip.i as usize;
-                for i in 0..=n2 {
-                    chip.v[i as usize] = chip.memory[mem_addr];
-                    mem_addr += 1;
-                }
-            }
+            0x1 => match n4 {
+                0xE => instructions::add_i_vx(chip, n2, n3, n4),
+                _ => return,
+            },
+            0x2 =>
+            0x3 => instructions::ld_b_vx(chip, n2),
+            0x5 => instructions::ld_i_vx(chip, n2),
+            0x6 => instructions::ld_vx_i(chip, n2),
             _ => return,
         },
         _ => return,
@@ -206,8 +127,8 @@ fn execute(chip: &mut VirtualChip, op: u8, n2: u8, n3: u8, n4: u8) {
 fn main() {
     let mut window = Window::new(
         "Chip8-rs",
-        64,
-        32,
+        WINDOW_WIDTH,
+        WINDOW_HEIGHT,
         WindowOptions {
             resize: true,
             ..WindowOptions::default()
@@ -223,7 +144,11 @@ fn main() {
         sp: 0,
         stack: [0; 16],
         v_screen: [[false; 64]; 32],
+        keyboard: [false; 16],
     };
+
+    // Load digits sprites into memory
+    chip.memory[0..80].copy_from_slice(&DIGITS_SPRITES);
 
     // TODO: rom_path must be a shell argument
     let rom_path = "ibm_logo.ch8";
@@ -232,12 +157,47 @@ fn main() {
     let rom_size = rom_data.len();
     chip.memory[512..rom_size + 512].copy_from_slice(&rom_data);
 
-    // Main loop *fetch -> decode -> execute*
-    loop {
+    // Main loop `fetch -> decode -> execute`
+    while window.is_open() {
+        window.get_keys().iter().for_each(|key| match key {
+            Key::Key0 => chip.keyboard[0] = true,
+            Key::Key1 => chip.keyboard[1] = true,
+            Key::Key2 => chip.keyboard[2] = true,
+            Key::Key3 => chip.keyboard[3] = true,
+            Key::Key4 => chip.keyboard[4] = true,
+            Key::Key5 => chip.keyboard[5] = true,
+            Key::Key6 => chip.keyboard[6] = true,
+            Key::Key7 => chip.keyboard[7] = true,
+            Key::Key8 => chip.keyboard[8] = true,
+            Key::Key9 => chip.keyboard[9] = true,
+            Key::A => chip.keyboard[10] = true,
+            Key::B => chip.keyboard[11] = true,
+            Key::C => chip.keyboard[12] = true,
+            Key::D => chip.keyboard[13] = true,
+            Key::E => chip.keyboard[14] = true,
+            Key::F => chip.keyboard[15] = true,
+            _ => (),
+        });
+
         let opcode = fetch(&chip);
         chip.pc += 2;
 
         let (op, n2, n3, n4) = decode(opcode);
-        execute(&mut chip, op, n2, n3, n4);
+        execute(&mut chip, &window, op, n2, n3, n4);
+
+        let mut buffer: Vec<u32> = Vec::new();
+        for column in 0..chip.v_screen.len() {
+            for row in 0..chip.v_screen[0].len() {
+                let mut rgb_value: u32 = 0;
+                if chip.v_screen[column][row] {
+                    rgb_value = 0xffffff;
+                } else {
+                    rgb_value = 0x000000;
+                }
+                buffer.push(rgb_value);
+            }
+        }
+        window.update_with_buffer(&buffer, WINDOW_WIDTH, WINDOW_HEIGHT);
+        chip.keyboard = [false; 16];
     }
 }
