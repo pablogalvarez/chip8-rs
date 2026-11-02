@@ -1,4 +1,4 @@
-use minifb::{Key, KeyRepeat, Window, WindowOptions};
+use minifb::{Key, Window, WindowOptions};
 use std::fs;
 
 mod instructions;
@@ -25,7 +25,30 @@ const DIGITS_SPRITES: [u8; 80] = [
     0xe0, 0x90, 0x90, 0x90, 0xe0, // D
     0xf0, 0x80, 0xf0, 0x80, 0xf0, // E
     0xf0, 0x80, 0xf0, 0x80, 0x80, // F
-]
+];
+const INSTRUCTIONS_PER_FRAME: u8 = 10;
+
+// translation table for chip8 keyboard
+// 0 -> Key0
+// 1 -> Key1
+const KEYBOARD_TRANSLATION: [Key; 16] = [
+    Key::Key0,
+    Key::Key1,
+    Key::Key2,
+    Key::Key3,
+    Key::Key4,
+    Key::Key5,
+    Key::Key6,
+    Key::Key7,
+    Key::Key8,
+    Key::Key9,
+    Key::A,
+    Key::B,
+    Key::C,
+    Key::D,
+    Key::E,
+    Key::F,
+];
 
 fn load_rom(rom_path: &str) -> Vec<u8> {
     match fs::read(rom_path) {
@@ -56,7 +79,7 @@ fn decode(opcode: u16) -> (u8, u8, u8, u8) {
     //
     // Every part of an instruction carries a meaning
     // so we need to extract them one by one. For example:
-    // ```text
+    // ```md
     // ***2nnn - CALL addr***
     // Call subroutine at *nnn*
     // ```
@@ -68,7 +91,7 @@ fn decode(opcode: u16) -> (u8, u8, u8, u8) {
     )
 }
 
-fn execute(chip: &mut VirtualChip, window: &Window, op: u8, n2: u8, n3: u8, n4: u8) {
+fn execute(chip: &mut VirtualChip, op: u8, n2: u8, n3: u8, n4: u8) {
     match op {
         0x0 => match n4 {
             0x0 => instructions::cls(chip),
@@ -106,15 +129,17 @@ fn execute(chip: &mut VirtualChip, window: &Window, op: u8, n2: u8, n3: u8, n4: 
         },
         0xf => match n3 {
             0x0 => match n4 {
-                0x7 => {}
-                0xa => instructions::ld_vx_k(chip, window, n2),
+                0x7 => instructions::ld_vx_dt(chip, n2),
+                0xa => instructions::ld_vx_k(chip, n2),
                 _ => return,
             },
             0x1 => match n4 {
-                0xE => instructions::add_i_vx(chip, n2, n3, n4),
+                0x5 => instructions::ld_dt_vx(chip, n2),
+                0x8 => instructions::ld_st_vx(chip, n2),
+                0xe => instructions::add_i_vx(chip, n2),
                 _ => return,
             },
-            0x2 =>
+            0x2 => instructions::ld_f_vx(chip, n2),
             0x3 => instructions::ld_b_vx(chip, n2),
             0x5 => instructions::ld_i_vx(chip, n2),
             0x6 => instructions::ld_vx_i(chip, n2),
@@ -135,6 +160,7 @@ fn main() {
         },
     )
     .expect("Unable to open Window");
+    window.set_target_fps(60);
 
     let mut chip = VirtualChip {
         memory: [0; 4096],
@@ -145,6 +171,8 @@ fn main() {
         stack: [0; 16],
         v_screen: [[false; 64]; 32],
         keyboard: [false; 16],
+        dt: 0,
+        st: 0,
     };
 
     // Load digits sprites into memory
@@ -159,45 +187,36 @@ fn main() {
 
     // Main loop `fetch -> decode -> execute`
     while window.is_open() {
-        window.get_keys().iter().for_each(|key| match key {
-            Key::Key0 => chip.keyboard[0] = true,
-            Key::Key1 => chip.keyboard[1] = true,
-            Key::Key2 => chip.keyboard[2] = true,
-            Key::Key3 => chip.keyboard[3] = true,
-            Key::Key4 => chip.keyboard[4] = true,
-            Key::Key5 => chip.keyboard[5] = true,
-            Key::Key6 => chip.keyboard[6] = true,
-            Key::Key7 => chip.keyboard[7] = true,
-            Key::Key8 => chip.keyboard[8] = true,
-            Key::Key9 => chip.keyboard[9] = true,
-            Key::A => chip.keyboard[10] = true,
-            Key::B => chip.keyboard[11] = true,
-            Key::C => chip.keyboard[12] = true,
-            Key::D => chip.keyboard[13] = true,
-            Key::E => chip.keyboard[14] = true,
-            Key::F => chip.keyboard[15] = true,
-            _ => (),
-        });
+        chip.keyboard
+            .iter_mut()
+            .enumerate()
+            .for_each(|(idx, pressed)| *pressed = window.is_key_down(KEYBOARD_TRANSLATION[idx]));
 
-        let opcode = fetch(&chip);
-        chip.pc += 2;
+        for _ in 0..INSTRUCTIONS_PER_FRAME {
+            let opcode = fetch(&chip);
+            chip.pc += 2;
 
-        let (op, n2, n3, n4) = decode(opcode);
-        execute(&mut chip, &window, op, n2, n3, n4);
+            let (op, n2, n3, n4) = decode(opcode);
+            execute(&mut chip, op, n2, n3, n4);
+        }
+
+        // timers
+        chip.dt = chip.dt.saturating_sub(1);
+        chip.st = chip.st.saturating_sub(1);
 
         let mut buffer: Vec<u32> = Vec::new();
-        for column in 0..chip.v_screen.len() {
-            for row in 0..chip.v_screen[0].len() {
-                let mut rgb_value: u32 = 0;
-                if chip.v_screen[column][row] {
-                    rgb_value = 0xffffff;
+        for row in 0..chip.v_screen.len() {
+            for column in 0..chip.v_screen[0].len() {
+                let rgb_value: u32 = if chip.v_screen[row][column] {
+                    0xffffff
                 } else {
-                    rgb_value = 0x000000;
-                }
+                    0x000000
+                };
                 buffer.push(rgb_value);
             }
         }
-        window.update_with_buffer(&buffer, WINDOW_WIDTH, WINDOW_HEIGHT);
-        chip.keyboard = [false; 16];
+        window
+            .update_with_buffer(&buffer, WINDOW_WIDTH, WINDOW_HEIGHT)
+            .unwrap();
     }
 }

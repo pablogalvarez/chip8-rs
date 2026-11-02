@@ -7,4 +7,6 @@ pub struct VirtualChip {
     pub stack: [u16; 16],
     pub v_screen: [[bool; 64]; 32], // Chip-8 screen has 64x32 pixels
     pub keyboard: [bool; 16],
+    pub dt: u8,
+    pub st: u8,
 }

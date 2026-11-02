@@ -1,5 +1,3 @@
-use minifb::{Key, KeyRepeat, Window};
-
 use crate::structs::VirtualChip;
 
 pub fn cls(chip: &mut VirtualChip) {
@@ -164,36 +162,26 @@ pub fn sknp_vx(chip: &mut VirtualChip, n2: u8) {
     }
 }
 
-pub fn ld_vx_k(chip: &mut VirtualChip, window: &Window, n2: u8) {
-    if window.get_keys().len() == 0 {
-        chip.pc -= 2;
+pub fn ld_vx_k(chip: &mut VirtualChip, n2: u8) {
+    match chip.keyboard.iter().position(|&k| k) {
+        Some(idx) => chip.v[n2 as usize] = idx as u8,
+        None => chip.pc -= 2,
     }
-    if let Some(k) = window.get_keys().first() {
-        match k {
-            Key::Key0 => chip.v[n2 as usize] = 0,
-            Key::Key1 => chip.v[n2 as usize] = 1,
-            Key::Key2 => chip.v[n2 as usize] = 2,
-            Key::Key3 => chip.v[n2 as usize] = 3,
-            Key::Key4 => chip.v[n2 as usize] = 4,
-            Key::Key5 => chip.v[n2 as usize] = 5,
-            Key::Key6 => chip.v[n2 as usize] = 6,
-            Key::Key7 => chip.v[n2 as usize] = 7,
-            Key::Key8 => chip.v[n2 as usize] = 8,
-            Key::Key9 => chip.v[n2 as usize] = 9,
-            Key::A => chip.v[n2 as usize] = 10,
-            Key::B => chip.v[n2 as usize] = 11,
-            Key::C => chip.v[n2 as usize] = 12,
-            Key::D => chip.v[n2 as usize] = 13,
-            Key::E => chip.v[n2 as usize] = 14,
-            Key::F => chip.v[n2 as usize] = 15,
-            _ => (),
-        }
-    };
 }
 
-pub fn ld_vx_dt(chip: &mut VirtualChip, n2: u8, n3: u8, n4: u8) {}
+pub fn ld_dt_vx(chip: &mut VirtualChip, n2: u8) {
+    chip.dt = chip.v[n2 as usize];
+}
 
-pub fn add_i_vx(chip: &mut VirtualChip, n2: u8, n3: u8, n4: u8) {
+pub fn ld_st_vx(chip: &mut VirtualChip, n2: u8) {
+    chip.st = chip.v[n2 as usize];
+}
+
+pub fn ld_vx_dt(chip: &mut VirtualChip, n2: u8) {
+    chip.v[n2 as usize] = chip.dt;
+}
+
+pub fn add_i_vx(chip: &mut VirtualChip, n2: u8) {
     chip.i += chip.v[n2 as usize] as u16;
 }
 
